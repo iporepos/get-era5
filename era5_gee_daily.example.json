@@ -1,0 +1,58 @@
+{
+    "ee_project": "your-earth-engine-project",
+    "years": [
+        2020
+    ],
+    "bbox": {
+        "north": -27.0,
+        "south": -34.0,
+        "west": -58.0,
+        "east": -48.0
+    },
+    "extent_alias": "RS",
+    "output_root": "C:/path/to/archive",
+    "overwrite": false,
+    "compression": "int16",
+    "decimals": {
+        "PREC": 2,
+        "ET": 2,
+        "PET": 2,
+        "RUNOFF": 2,
+        "WIND": 2,
+        "SWVL": 4,
+        "TMP": 2,
+        "PREC-PEAK": 2
+    },
+    "products": {
+        "PREC": [
+            "sum",
+            "max"
+        ],
+        "ET": [
+            "sum"
+        ],
+        "PET": [
+            "sum"
+        ],
+        "RUNOFF": [
+            "sum"
+        ],
+        "WIND": [
+            "u_mean",
+            "v_mean",
+            "speed_mean",
+            "speed_max"
+        ],
+        "SWVL4": [
+            "mean"
+        ],
+        "TMP": [
+            "mean",
+            "min",
+            "max"
+        ],
+        "PREC-PEAK": [
+            "max"
+        ]
+    }
+}

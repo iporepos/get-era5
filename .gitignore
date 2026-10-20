@@ -1,3 +1,11 @@
+CLAUDE.md
+prompts/
+.claude/
+*.local*
+scripts/
+archive_*/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
