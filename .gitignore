@@ -4,6 +4,7 @@ prompts/
 *.local*
 scripts/
 archive_*/
+.idea/
 
 
 # Byte-compiled / optimized / DLL files
