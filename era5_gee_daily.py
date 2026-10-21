@@ -69,9 +69,16 @@ EPOCH = "1950-01-01"
 U10, V10 = "u_component_of_wind_10m", "v_component_of_wind_10m"
 
 # kind: accum (hourly amounts in m -> mm), instant (any other hourly field), wind
+# accum units: sum in mm, max in mm h-1. max = largest hourly amount, unless the product has a
+# peak band (max_band): then it is the largest model time-step rate (kg m-2 s-1 = mm s-1)
 PRODUCT_DEFS = {
     "PPT": dict(kind="accum", band="total_precipitation", factor=1000.0, units="mm",
-                 long_name="total precipitation"),
+                long_name="total precipitation",
+                max_band="maximum_total_precipitation_rate_since_previous_post_processing",
+                max_factor=3600.0,
+                max_long_name="peak precipitation rate within the UTC day "
+                              "(largest model time-step rate)",
+                extra_stats={"t"}),
     # ERA5 stores evaporation negative (downward fluxes positive): flip the sign
     "AET": dict(kind="accum", band="evaporation", factor=-1000.0, units="mm",
                 long_name="total evapotranspiration"),
@@ -82,10 +89,6 @@ PRODUCT_DEFS = {
               long_name="total runoff"),
     "TAS": dict(kind="instant", band="temperature_2m", factor=1.0, offset=-273.15,
                 units="degC", long_name="2 m temperature"),
-    "PPT-PEAK": dict(kind="instant",
-                     band="maximum_total_precipitation_rate_since_previous_post_processing",
-                     factor=3600.0, offset=0.0, units="mm h-1",
-                     long_name="peak precipitation rate within the hour"),
     "WIND": dict(kind="wind"),
 }
 for _n, _depth in ((1, "0-7 cm"), (2, "7-28 cm"), (3, "28-100 cm"), (4, "100-289 cm")):
@@ -105,13 +108,15 @@ WIND_NAMES = {   # stat -> (file var code, how, long name, units)
     "dir_mean": ("WDA", "mean", "daily mean 10 m wind direction (from which it blows, "
                  "clockwise from north; unit-vector mean of hourly directions)", "degree"),
 }
-# decimals kept (precision 10**-decimals): PPT/AET/PET/Q in mm, WIND in m/s,
-# SWVL in m3/m3, TAS in degC, PPT-PEAK in mm/h
-DEFAULT_DECIMALS = {"PPT": 2, "AET": 2, "PET": 2, "Q": 2, "WIND": 2, "SWVL": 4,
-                    "TAS": 2, "PPT-PEAK": 2}
-# old product keys (files already written: scripts/rename_codes.py)
-RENAMED = {"PREC": "PPT", "ET": "AET", "TMP": "TAS", "PREC-PEAK": "PPT-PEAK",
-           "RUNOFF": "Q"}
+# decimals kept (precision 10**-decimals): PPT/AET/PET/Q in mm (or mm/h), WIND in m/s,
+# SWVL in m3/m3, TAS in degC
+DEFAULT_DECIMALS = {"PPT": 2, "AET": 2, "PET": 2, "Q": 2, "WIND": 2, "SWVL": 4, "TAS": 2}
+# old product keys (files already written: scripts/rename_codes.py, scripts/replace_ppt_max.py)
+RENAMED = {"PREC": "PPT", "ET": "AET", "TMP": "TAS", "RUNOFF": "Q",
+           "PREC-PEAK": "PPT with statistic max", "PPT-PEAK": "PPT with statistic max"}
+# PPT t (duration): hours of the UTC day with at least this much rain (method decision,
+# fixed on purpose; dry days give 0)
+WET_HOUR_MM = 1.0
 COMPRESSION_MODES = ("int16", "rounded", "none")
 KNOWN_KEYS = {"ee_project", "years", "bbox", "extent_alias", "output_root", "overwrite",
               "compression", "decimals", "products"}
@@ -167,7 +172,7 @@ def load_config(path: Path) -> Config:
     products = {str(k).upper(): list(v) for k, v in raw["products"].items()}
     for p, stats in products.items():
         if p in RENAMED:
-            raise ValueError(f"product {p} is now called {RENAMED[p]}; rename it in {path.name}")
+            raise ValueError(f"product {p} is now {RENAMED[p]}; change it in {path.name}")
         if p not in PRODUCT_DEFS:
             raise ValueError(f"unknown product {p}; known: {sorted(PRODUCT_DEFS)}")
         outputs(p, stats)                                       # validates the statistics
@@ -217,10 +222,11 @@ def elapsed(t0: float) -> str:
 def outputs(product: str, stats: list) -> list:
     """[(stat, file var code, DAILY-STAT code, nc variable name, long_name, units, how)]"""
     d = PRODUCT_DEFS[product]
-    bad = set(stats) - ALLOWED[d["kind"]]
+    allowed = ALLOWED[d["kind"]] | d.get("extra_stats", set())
+    bad = set(stats) - allowed
     if bad:
         raise ValueError(f"{product}: statistic(s) {sorted(bad)} not allowed; "
-                         f"choose from {sorted(ALLOWED[d['kind']])}")
+                         f"choose from {sorted(allowed)}")
     outs = []
     for s in stats:
         if d["kind"] == "wind":
@@ -228,9 +234,15 @@ def outputs(product: str, stats: list) -> list:
         else:
             code, how, units = product, s, d["units"]
             if d["kind"] == "accum":
-                long_name = (f"daily total of {d['long_name']}" if s == "sum" else
-                             f"largest hourly amount of {d['long_name']} within the UTC day")
-                units = d["units"] if s == "sum" else f"{d['units']} h-1"
+                if s == "sum":
+                    long_name = f"daily total of {d['long_name']}"
+                elif s == "t":
+                    long_name = (f"duration: hours of the UTC day with at least {WET_HOUR_MM:g} mm "
+                                 f"of {d['long_name']}")
+                else:
+                    long_name = d.get("max_long_name",
+                                      f"largest hourly amount of {d['long_name']} within the UTC day")
+                units = {"sum": d["units"], "t": "h"}.get(s, f"{d['units']} h-1")
             else:
                 long_name = f"daily {s} of {d['long_name']}"
         nc = f"{code}_{how}".lower().replace("-", "_") if d["kind"] == "wind" \
@@ -334,6 +346,14 @@ def daily_collection(ee, product: str, stats: list, year: int, n_days: int):
                 f = d["factor"]
                 if stat == "sum":
                     img = hrs.select(d["band"]).sum()
+                elif stat == "t":     # count of wet hours; already in h, no factor
+                    to_mm = d["factor"]
+                    wet = hrs.select(d["band"]).map(
+                        lambda im: ee.Image(im).multiply(to_mm).gte(WET_HOUR_MM))
+                    img, f = wet.sum(), 1
+                elif "max_band" in d:   # peak rate within each hour (mm s-1 -> mm h-1)
+                    f = d["max_factor"]
+                    img = hrs.select(d["max_band"]).max()
                 else:   # largest hourly amount; for a sign-flipped variable that is the min
                     img = hrs.select(d["band"]).max() if f > 0 else hrs.select(d["band"]).min()
                 bands.append(img.multiply(f).rename(nc))
@@ -432,8 +452,9 @@ def write_file(cfg: Config, ds_year: xr.Dataset, nc: str, long_name: str, units:
                path: Path, year: int, n_days: int, complete: bool, product: str) -> str:
     """Write, read back and verify, then rename into place. Returns the packing used."""
     da = ds_year[nc].astype("float32")
+    method = f"count of hours >= {WET_HOUR_MM:g} mm" if how == "t" else how
     da.attrs = {"long_name": long_name, "units": units,
-                "cell_methods": f"time: {how} (hourly values within the UTC day)"}
+                "cell_methods": f"time: {method} (hourly values within the UTC day)"}
     out = xr.Dataset({nc: da})
     out["time"].attrs = {"long_name": "time (UTC day start)"}
     out["latitude"].attrs = {"standard_name": "latitude", "units": "degrees_north"}

@@ -25,6 +25,11 @@ to retry.
 covers the hour before its stamp). Wind speed and direction are computed hourly from u and
 v before the daily statistic.
 
+Flow variables (`PPT`, `AET`, `PET`, `Q`): `sum` is an amount per day (mm), `max` an
+intensity (mm h-1). `PPT` `t` counts the hours of the day with at least 1 mm of rain, 0..24;
+the 1 mm threshold is a fixed method choice (it also keeps ERA5's widespread light drizzle
+out of the count).
+
 **Wind direction (`WDA`).** Degrees clockwise from north (0 = from the north, 90 = from the
 east), the direction the wind blows *from*, in 0…360. ERA5 has no 10 m direction band over
 land, so each of the 24 hours gives a unit vector from its u and v; the daily value is the
@@ -33,16 +38,15 @@ out. Plain averaging of angles would be wrong (350° and 10° would give 180°).
 
 ## Products and statistics
 
-| Product | ERA5 band | Statistics | Units |
-|---|---|---|---|
-| `PPT` | `total_precipitation` | `sum`, `max` (largest hourly amount) | mm |
-| `AET` | `evaporation` (sign flipped, positive = evaporation) | `sum`, `max` | mm |
-| `PET` | `potential_evaporation` (sign flipped) | `sum`, `max` | mm |
-| `Q` | `runoff` (surface + sub-surface water leaving the cell; not routed, not river flow) | `sum`, `max` (largest hourly amount, for flood risk) | mm |
-| `WIND` | 10 m u and v | `speed_mean`, `speed_max` (file `WDS`, m s-1); `dir_mean` (file `WDA`, degree) | see left |
-| `TAS` | `temperature_2m` | `mean`, `min`, `max` | °C |
-| `PPT-PEAK` | max precipitation rate since previous post-processing | `mean`, `min`, `max` | mm h-1 |
-| `SWVL1`…`SWVL4` | volumetric soil water, layers 0-7, 7-28, 28-100, 100-289 cm | `mean`, `min`, `max` | m3 m-3 |
+| Product | ERA5 band | Statistics and units |
+|---|---|---|
+| `PPT` | `total_precipitation`; `max` from `maximum_total_precipitation_rate_since_previous_post_processing` | `sum` mm; `max` mm h-1 = peak rate of the day (largest model time-step rate, not the wettest hour); `t` h = duration: hours with at least 1 mm (0 on dry days) |
+| `AET` | `evaporation` (sign flipped, positive = evaporation) | `sum` mm; `max` mm h-1 (largest hourly amount) |
+| `PET` | `potential_evaporation` (sign flipped) | `sum` mm; `max` mm h-1 (largest hourly amount) |
+| `Q` | `runoff` (surface + sub-surface water leaving the cell; not routed, not river flow) | `sum` mm; `max` mm h-1 (largest hourly amount, for flood risk) |
+| `WIND` | 10 m u and v | `speed_mean`, `speed_max` m s-1 (file `WDS`); `dir_mean` degree (file `WDA`) |
+| `TAS` | `temperature_2m` | `mean`, `min`, `max` °C |
+| `SWVL1`…`SWVL4` | volumetric soil water, layers 0-7, 7-28, 28-100, 100-289 cm | `mean`, `min`, `max` m3 m-3 |
 
 ## Layout
 

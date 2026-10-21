@@ -20,13 +20,13 @@
         "Q": 2,
         "WIND": 2,
         "SWVL": 4,
-        "TAS": 2,
-        "PPT-PEAK": 2
+        "TAS": 2
     },
     "products": {
         "PPT": [
             "sum",
-            "max"
+            "max",
+            "t"
         ],
         "AET": [
             "sum"
@@ -49,9 +49,6 @@
         "TAS": [
             "mean",
             "min",
-            "max"
-        ],
-        "PPT-PEAK": [
             "max"
         ]
     }
