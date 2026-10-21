@@ -5,14 +5,14 @@ PROTOTYPE - daily ERA5 statistics computed inside Google Earth Engine (no CDS qu
     python era5_gee_daily.py                       # settings from era5_gee_daily.local.json
     python era5_gee_daily.py --config other.json   # another settings file
     python era5_gee_daily.py --dry-run             # grid, last available day and plan only
-    python era5_gee_daily.py --only PREC,WIND      # some products only
+    python era5_gee_daily.py --only PPT,WIND       # some products only
     python era5_gee_daily.py --verbose             # debug details on the console too
 
 Hourly ERA5 (ECMWF/ERA5/HOURLY, 0.25 deg) is aggregated to UTC days ON EARTH ENGINE'S
-SERVERS (sum / max / mean of the hourly values, wind speed computed hourly first). Only the
+SERVERS (sum / max / mean of the hourly values; wind speed and direction computed hourly first). Only the
 small daily result is downloaded and written as NetCDF, one file per product-statistic-year:
 
-    <output_root>/DAILY/COPERNICUS_ERA5_{VAR}_{DAILY-STAT}_{EXTENT}_{YEAR}.nc
+    <output_root>/{VAR}/DAILY/COPERNICUS_ERA5_{VAR}_{DAILY-STAT}_{EXTENT}_{YEAR}.nc
 
 Settings live in a sidecar JSON next to this script (era5_gee_daily.local.json, not
 tracked by git; template: era5_gee_daily.example.json):
@@ -27,7 +27,7 @@ tracked by git; template: era5_gee_daily.example.json):
     overwrite    : true = rebuild files that already exist (default false)
     compression  : "int16" (default) | "rounded" | "none"
     decimals     : decimals kept per product, merged over the defaults below
-    products     : {"PREC": ["sum", "max"], ...} (required), see PRODUCT_DEFS / ALLOWED
+    products     : {"PPT": ["sum", "max"], ...} (required), see PRODUCT_DEFS / ALLOWED
 
 Every run also writes a log file to <output_root>/logs/.
 
@@ -70,21 +70,22 @@ U10, V10 = "u_component_of_wind_10m", "v_component_of_wind_10m"
 
 # kind: accum (hourly amounts in m -> mm), instant (any other hourly field), wind
 PRODUCT_DEFS = {
-    "PREC": dict(kind="accum", band="total_precipitation", factor=1000.0, units="mm",
+    "PPT": dict(kind="accum", band="total_precipitation", factor=1000.0, units="mm",
                  long_name="total precipitation"),
     # ERA5 stores evaporation negative (downward fluxes positive): flip the sign
-    "ET": dict(kind="accum", band="evaporation", factor=-1000.0, units="mm",
-               long_name="total evapotranspiration"),
+    "AET": dict(kind="accum", band="evaporation", factor=-1000.0, units="mm",
+                long_name="total evapotranspiration"),
     "PET": dict(kind="accum", band="potential_evaporation", factor=-1000.0, units="mm",
                 long_name="potential evaporation"),
-    "RUNOFF": dict(kind="accum", band="runoff", factor=1000.0, units="mm",
-                   long_name="total runoff"),
-    "TMP": dict(kind="instant", band="temperature_2m", factor=1.0, offset=-273.15,
+    # Q: total runoff (surface + sub-surface) leaving the cell, not routed downstream
+    "Q": dict(kind="accum", band="runoff", factor=1000.0, units="mm",
+              long_name="total runoff"),
+    "TAS": dict(kind="instant", band="temperature_2m", factor=1.0, offset=-273.15,
                 units="degC", long_name="2 m temperature"),
-    "PREC-PEAK": dict(kind="instant",
-                      band="maximum_total_precipitation_rate_since_previous_post_processing",
-                      factor=3600.0, offset=0.0, units="mm h-1",
-                      long_name="peak precipitation rate within the hour"),
+    "PPT-PEAK": dict(kind="instant",
+                     band="maximum_total_precipitation_rate_since_previous_post_processing",
+                     factor=3600.0, offset=0.0, units="mm h-1",
+                     long_name="peak precipitation rate within the hour"),
     "WIND": dict(kind="wind"),
 }
 for _n, _depth in ((1, "0-7 cm"), (2, "7-28 cm"), (3, "28-100 cm"), (4, "100-289 cm")):
@@ -94,18 +95,23 @@ for _n, _depth in ((1, "0-7 cm"), (2, "7-28 cm"), (3, "28-100 cm"), (4, "100-289
 ALLOWED = {
     "accum": {"sum", "max"},
     "instant": {"mean", "min", "max"},
-    "wind": {"u_mean", "v_mean", "speed_mean", "speed_max"},
+    "wind": {"speed_mean", "speed_max", "dir_mean"},
 }
-WIND_NAMES = {   # stat -> (file var code, how, long name)
-    "u_mean": ("WIND-U", "mean", "daily mean eastward 10 m wind (mean of hourly values)"),
-    "v_mean": ("WIND-V", "mean", "daily mean northward 10 m wind (mean of hourly values)"),
-    "speed_mean": ("WIND-SPEED", "mean", "daily mean of hourly 10 m wind speed"),
-    "speed_max": ("WIND-SPEED", "max", "largest hourly 10 m wind speed within the UTC day"),
+WIND_NAMES = {   # stat -> (file var code, how, long name, units)
+    "speed_mean": ("WDS", "mean", "daily mean of hourly 10 m wind speed", "m s-1"),
+    "speed_max": ("WDS", "max", "largest hourly 10 m wind speed within the UTC day", "m s-1"),
+    # unit-vector mean of the 24 hourly directions: every hour counts the same, calm hours
+    # (speed 0) are left out; meteorological convention (blowing FROM, clockwise, N = 0)
+    "dir_mean": ("WDA", "mean", "daily mean 10 m wind direction (from which it blows, "
+                 "clockwise from north; unit-vector mean of hourly directions)", "degree"),
 }
-# decimals kept (precision 10**-decimals): PREC/ET/PET/RUNOFF in mm, WIND in m/s,
-# SWVL in m3/m3, TMP in degC, PREC-PEAK in mm/h
-DEFAULT_DECIMALS = {"PREC": 2, "ET": 2, "PET": 2, "RUNOFF": 2, "WIND": 2, "SWVL": 4,
-                    "TMP": 2, "PREC-PEAK": 2}
+# decimals kept (precision 10**-decimals): PPT/AET/PET/Q in mm, WIND in m/s,
+# SWVL in m3/m3, TAS in degC, PPT-PEAK in mm/h
+DEFAULT_DECIMALS = {"PPT": 2, "AET": 2, "PET": 2, "Q": 2, "WIND": 2, "SWVL": 4,
+                    "TAS": 2, "PPT-PEAK": 2}
+# old product keys (files already written: scripts/rename_codes.py)
+RENAMED = {"PREC": "PPT", "ET": "AET", "TMP": "TAS", "PREC-PEAK": "PPT-PEAK",
+           "RUNOFF": "Q"}
 COMPRESSION_MODES = ("int16", "rounded", "none")
 KNOWN_KEYS = {"ee_project", "years", "bbox", "extent_alias", "output_root", "overwrite",
               "compression", "decimals", "products"}
@@ -160,6 +166,8 @@ def load_config(path: Path) -> Config:
         raise ValueError(f"'compression' must be one of {COMPRESSION_MODES}")
     products = {str(k).upper(): list(v) for k, v in raw["products"].items()}
     for p, stats in products.items():
+        if p in RENAMED:
+            raise ValueError(f"product {p} is now called {RENAMED[p]}; rename it in {path.name}")
         if p not in PRODUCT_DEFS:
             raise ValueError(f"unknown product {p}; known: {sorted(PRODUCT_DEFS)}")
         outputs(p, stats)                                       # validates the statistics
@@ -216,8 +224,7 @@ def outputs(product: str, stats: list) -> list:
     outs = []
     for s in stats:
         if d["kind"] == "wind":
-            code, how, long_name = WIND_NAMES[s]
-            units = "m s-1"
+            code, how, long_name, units = WIND_NAMES[s]
         else:
             code, how, units = product, s, d["units"]
             if d["kind"] == "accum":
@@ -233,7 +240,7 @@ def outputs(product: str, stats: list) -> list:
 
 
 def out_path(cfg: Config, code: str, stat_code: str, year: int) -> Path:
-    return cfg.output_root / "DAILY" / f"COPERNICUS_ERA5_{code}_{stat_code}_{cfg.extent_alias}_{year}.nc"
+    return cfg.output_root / code / "DAILY" / f"COPERNICUS_ERA5_{code}_{stat_code}_{cfg.extent_alias}_{year}.nc"
 
 
 # --------------------------------------------------------------------------- #
@@ -296,9 +303,14 @@ def daily_collection(ee, product: str, stats: list, year: int, n_days: int):
     if d["kind"] == "wind":
         def add_speed(im):
             im = ee.Image(im)
-            return im.addBands(im.select(U10).hypot(im.select(V10)).rename("speed"))
-        src = {"u_mean": ("mean", U10), "v_mean": ("mean", V10),
-               "speed_mean": ("mean", "speed"), "speed_max": ("max", "speed")}
+            u, v = im.select(U10), im.select(V10)
+            speed = u.hypot(v)
+            # unit vector pointing to where the wind comes FROM: (east, north) = -(u, v) / speed
+            moving = speed.gt(0)                               # calm hours have no direction
+            from_e = u.multiply(-1).divide(speed).updateMask(moving).rename("from_e")
+            from_n = v.multiply(-1).divide(speed).updateMask(moving).rename("from_n")
+            return im.addBands([speed.rename("speed"), from_e, from_n])
+        src = {"speed_mean": ("mean", "speed"), "speed_max": ("max", "speed")}
 
     def one(i):
         start = year_start.advance(ee.Number(i), "day")
@@ -309,7 +321,12 @@ def daily_collection(ee, product: str, stats: list, year: int, n_days: int):
             hrs = hrs.map(add_speed)
         bands = []
         for stat, _, _, nc, _, _, _ in outs:
-            if d["kind"] == "wind":
+            if stat == "dir_mean":
+                # compass angle of the mean unit vector: atan2(east, north), 0..360, N = 0
+                e, n = hrs.select("from_e").mean(), hrs.select("from_n").mean()
+                deg = e.atan2(n).multiply(180 / math.pi).add(360).mod(360)
+                bands.append(deg.rename(nc))
+            elif d["kind"] == "wind":
                 how, band = src[stat]
                 red = getattr(hrs.select(band), how)()
                 bands.append(red.rename(nc))
@@ -457,9 +474,9 @@ def write_file(cfg: Config, ds_year: xr.Dataset, nc: str, long_name: str, units:
 
 
 def plausibility(product: str, nc: str, da: xr.DataArray) -> xr.DataArray:
-    """Sanity checks. Returns the array, with float-noise negatives of PREC/RUNOFF set to 0.
+    """Sanity checks. Returns the array, with float-noise negatives of PPT/Q set to 0.
 
-    ET/PET can legitimately be negative after the sign flip (condensation / dew), so only
+    AET/PET can legitimately be negative after the sign flip (condensation / dew), so only
     their mean is checked."""
     vals = da.values
     if not np.isfinite(vals).any():
@@ -470,12 +487,12 @@ def plausibility(product: str, nc: str, da: xr.DataArray) -> xr.DataArray:
         lo, hi = float(np.nanmin(vals)), float(np.nanmax(vals))
         if lo < -1e-6 or hi > 1.0:
             log.warning("    %s: values outside 0..1 m3/m3 (min %.3f, max %.3f)", nc, lo, hi)
-    if product in ("PREC", "RUNOFF"):
+    if product in ("PPT", "Q"):
         lo = float(np.nanmin(vals))
         if lo < -0.01:                      # more than rounding noise (mm)
             log.warning("    %s: negative values (min %.4f mm); check the data", nc, lo)
         da = da.clip(min=0)
-    if product in ("ET", "PET") and nc.endswith("_sum") and np.nanmean(vals) < 0:
+    if product in ("AET", "PET") and nc.endswith("_sum") and np.nanmean(vals) < 0:
         log.warning("    %s: mean is negative after the sign flip; check the sign convention", nc)
     return da
 

@@ -14,44 +14,44 @@
     "overwrite": false,
     "compression": "int16",
     "decimals": {
-        "PREC": 2,
-        "ET": 2,
+        "PPT": 2,
+        "AET": 2,
         "PET": 2,
-        "RUNOFF": 2,
+        "Q": 2,
         "WIND": 2,
         "SWVL": 4,
-        "TMP": 2,
-        "PREC-PEAK": 2
+        "TAS": 2,
+        "PPT-PEAK": 2
     },
     "products": {
-        "PREC": [
+        "PPT": [
             "sum",
             "max"
         ],
-        "ET": [
+        "AET": [
             "sum"
         ],
         "PET": [
             "sum"
         ],
-        "RUNOFF": [
-            "sum"
+        "Q": [
+            "sum",
+            "max"
         ],
         "WIND": [
-            "u_mean",
-            "v_mean",
             "speed_mean",
-            "speed_max"
+            "speed_max",
+            "dir_mean"
         ],
         "SWVL4": [
             "mean"
         ],
-        "TMP": [
+        "TAS": [
             "mean",
             "min",
             "max"
         ],
-        "PREC-PEAK": [
+        "PPT-PEAK": [
             "max"
         ]
     }
